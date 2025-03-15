@@ -2,17 +2,18 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg), feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "alloy")]
+mod eip1271;
 mod nonce;
 mod rfc3339;
-
-#[cfg(feature = "ethers")]
-mod eip1271;
 
 use ::core::{
     convert::Infallible,
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
+#[cfg(feature = "alloy")]
+use alloy::primitives::{Address, Bytes, FixedBytes};
 use hex::FromHex;
 use http::uri::{Authority, InvalidUri};
 use iri_string::types::UriString;
@@ -22,17 +23,17 @@ use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
 use time::OffsetDateTime;
 
-#[cfg(feature = "ethers")]
-use ethers::prelude::*;
-
 #[cfg(feature = "serde")]
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 
 pub use nonce::generate_nonce;
 pub use rfc3339::TimeStamp;
+
+#[cfg(feature = "alloy")]
+use crate::eip1271::AlloyProvider;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// EIP-4361 version.
@@ -342,9 +343,9 @@ typed_builder_doc! {
         pub nonce: Option<String>,
         /// Datetime for which the message should be valid at.
         pub timestamp: Option<OffsetDateTime>,
-        #[cfg(feature = "ethers")]
+        #[cfg(feature = "alloy")]
         /// RPC Provider used for on-chain checks. Necessary for contract wallets signatures.
-        pub rpc_provider: Option<Provider<Http>>,
+        pub rpc_provider: Option<AlloyProvider>,
     }
 }
 
@@ -357,7 +358,7 @@ impl Default for VerificationOpts {
             domain: None,
             nonce: None,
             timestamp: None,
-            #[cfg(feature = "ethers")]
+            #[cfg(feature = "alloy")]
             rpc_provider: None,
         }
     }
@@ -381,16 +382,21 @@ pub enum VerificationError {
     #[error("Message domain does not match")]
     /// Expected message domain does not match.
     DomainMismatch,
+    /// The contract returned a response that does not comply with the EIP-1271 specification
+    #[error("This contract is not EIP1271 compliant")]
+    Eip1271NonCompliant,
     #[error("Message nonce does not match")]
     /// Expected message nonce does not match.
     NonceMismatch,
-    #[cfg(feature = "ethers")]
+    #[cfg(feature = "alloy")]
     // Using a String because the original type requires a lifetime.
     #[error("Contract wallet query failed: {0}")]
     /// Contract wallet verification failed unexpectedly.
     ContractCall(String),
-    #[error("The signature is not 65 bytes long. It might mean that it is a EIP1271 signature and you have the `ethers` feature disabled or configured a provider.")]
-    /// The signature is not 65 bytes long. It might mean that it is a EIP1271 signature and you have the `ethers` feature disabled or configured a provider.
+    #[error(
+        "The signature is not 65 bytes long. It might mean that it is a EIP1271 signature and you have the `alloy` feature disabled or configured a provider."
+    )]
+    /// The signature is not 65 bytes long. It might mean that it is a EIP1271 signature and you have the `alloy` feature disabled or configured a provider.
     SignatureLength,
 }
 
@@ -452,7 +458,7 @@ impl Message {
         }
     }
 
-    #[cfg(feature = "ethers")]
+    #[cfg(feature = "alloy")]
     /// Verify the integrity of a, potentially, EIP-1271 signed message.
     ///
     /// # Arguments
@@ -466,10 +472,16 @@ impl Message {
     pub async fn verify_eip1271(
         &self,
         sig: &[u8],
-        provider: &Provider<Http>,
+        provider: &AlloyProvider,
     ) -> Result<bool, VerificationError> {
         let hash = Keccak256::new_with_prefix(self.eip191_bytes().unwrap()).finalize();
-        eip1271::verify_eip1271(self.address, hash.as_ref(), sig, provider).await
+        eip1271::verify_eip1271(
+            Address::new(self.address),
+            FixedBytes::from(hash.as_ref()),
+            Bytes::copy_from_slice(sig),
+            &provider,
+        )
+        .await
     }
 
     /// Validates time constraints and integrity of the object by matching it's signature.
@@ -535,7 +547,7 @@ impl Message {
             Err(VerificationError::SignatureLength)
         };
 
-        #[cfg(feature = "ethers")]
+        #[cfg(feature = "alloy")]
         if let Err(e) = res {
             if let Some(provider) = &opts.rpc_provider {
                 if self.verify_eip1271(sig, provider).await? {
@@ -685,6 +697,8 @@ const RES_TAG: &str = "Resources:";
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "alloy")]
+    use alloy::providers::ProviderBuilder;
     use time::format_description::well_known::Rfc3339;
 
     use super::*;
@@ -712,8 +726,9 @@ Resources:
         assert_eq!(message, &Message::from_str(message).unwrap().to_string());
 
         // incorrect order
-        assert!(Message::from_str(
-            r#"service.org wants you to sign in with your Ethereum account:
+        assert!(
+            Message::from_str(
+                r#"service.org wants you to sign in with your Ethereum account:
 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
 
 I accept the ServiceOrg Terms of Service: https://service.org/tos
@@ -726,8 +741,9 @@ Issued At: 2021-09-30T16:25:24Z
 Resources:
 - ipfs://bafybeiemxf5abjwjbikoz4mc3a3dla6ual3jsgpdr4cjr3oz3evfyavhwq/
 - https://example.com/my-web2-claim.json"#,
-        )
-        .is_err());
+            )
+            .is_err()
+        );
 
         //  no statement
         let message = r#"service.org wants you to sign in with your Ethereum account:
@@ -803,7 +819,6 @@ Resources:
         include_str!("../tests/siwe/test/verification_positive.json");
     const VERIFICATION_NEGATIVE: &str =
         include_str!("../tests/siwe/test/verification_negative.json");
-    #[cfg(feature = "ethers")]
     const VERIFICATION_EIP1271: &str = include_str!("../tests/siwe/test/eip1271.json");
 
     fn fields_to_message(fields: &serde_json::Value) -> anyhow::Result<Message> {
@@ -913,8 +928,7 @@ Resources:
             println!("✅")
         }
     }
-
-    #[cfg(feature = "ethers")]
+    #[cfg(feature = "alloy")]
     #[tokio::test]
     async fn verification_eip1271() {
         let tests: serde_json::Value = serde_json::from_str(VERIFICATION_EIP1271).unwrap();
@@ -930,7 +944,9 @@ Resources:
             )
             .unwrap();
             let opts = VerificationOpts {
-                rpc_provider: Some("https://eth.llamarpc.com".try_into().unwrap()),
+                rpc_provider: Some(
+                    ProviderBuilder::new().on_http("https://eth.llamarpc.com".parse().unwrap()),
+                ),
                 ..Default::default()
             };
             assert!(message.verify(&signature, &opts).await.is_ok());
