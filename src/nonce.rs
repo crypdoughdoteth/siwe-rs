@@ -1,5 +1,5 @@
 use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 
 /// Generates a secure nonce.
 pub fn generate_nonce() -> String {
