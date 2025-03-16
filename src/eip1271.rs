@@ -1,27 +1,14 @@
 use ERC1271::isValidSignatureReturn;
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
+    providers::RootProvider,
     sol,
+    transports::http::{Client, Http},
 };
 
 use crate::VerificationError;
 
-pub type AlloyProvider = alloy::providers::fillers::FillProvider<
-    alloy::providers::fillers::JoinFill<
-        alloy::providers::Identity,
-        alloy::providers::fillers::JoinFill<
-            alloy::providers::fillers::GasFiller,
-            alloy::providers::fillers::JoinFill<
-                alloy::providers::fillers::BlobGasFiller,
-                alloy::providers::fillers::JoinFill<
-                    alloy::providers::fillers::NonceFiller,
-                    alloy::providers::fillers::ChainIdFiller,
-                >,
-            >,
-        >,
-    >,
-    alloy::providers::RootProvider,
->;
+pub type AlloyProvider<Client> = RootProvider<Http<Client>>;
 
 sol! {
     #[sol(rpc)]
@@ -51,7 +38,7 @@ pub async fn verify_eip1271(
     address: Address,
     message_hash: FixedBytes<32>,
     signature: Bytes,
-    provider: &AlloyProvider,
+    provider: &AlloyProvider<Client>,
 ) -> Result<bool, VerificationError> {
     let contract = ERC1271::new(address, provider);
     let res = contract

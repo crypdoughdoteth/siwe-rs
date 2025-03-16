@@ -13,7 +13,11 @@ use ::core::{
     str::FromStr,
 };
 #[cfg(feature = "alloy")]
-use alloy::primitives::{Address, Bytes, FixedBytes};
+use alloy::{
+    primitives::{Address, Bytes, FixedBytes},
+    transports::http::Client,
+};
+
 use hex::FromHex;
 use http::uri::{Authority, InvalidUri};
 use iri_string::types::UriString;
@@ -345,7 +349,7 @@ typed_builder_doc! {
         pub timestamp: Option<OffsetDateTime>,
         #[cfg(feature = "alloy")]
         /// RPC Provider used for on-chain checks. Necessary for contract wallets signatures.
-        pub rpc_provider: Option<AlloyProvider>,
+        pub rpc_provider: Option<AlloyProvider<Client>>,
     }
 }
 
@@ -472,7 +476,7 @@ impl Message {
     pub async fn verify_eip1271(
         &self,
         sig: &[u8],
-        provider: &AlloyProvider,
+        provider: &AlloyProvider<Client>,
     ) -> Result<bool, VerificationError> {
         let hash = Keccak256::new_with_prefix(self.eip191_bytes().unwrap()).finalize();
         eip1271::verify_eip1271(
