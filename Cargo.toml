@@ -24,7 +24,7 @@ http = "1.0.0"
 rand = "0.8.5"
 serde = { version = "1.0.164", optional = true }
 typed-builder = { version = "0.14.0", optional = true }
-alloy = { version = "0.2", optional = true, features = ["full"]}
+alloy = { version = "0.2", optional = true, features = ["default", "providers", "sol-types", "contract"]}
 
 [dev-dependencies]
 serde_json = "1.0"
