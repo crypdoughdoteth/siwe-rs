@@ -7,17 +7,16 @@ mod eip1271;
 mod nonce;
 mod rfc3339;
 
+#[cfg(feature = "alloy")]
+use crate::eip1271::AlloyProvider;
 use ::core::{
     convert::Infallible,
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
-#[cfg(feature = "alloy")]
-use alloy::{
-    primitives::{Address, Bytes, FixedBytes},
-    transports::http::Client,
-};
 
+#[cfg(feature = "alloy")]
+use alloy::primitives::{Address, Bytes, FixedBytes};
 use hex::FromHex;
 use http::uri::{Authority, InvalidUri};
 use iri_string::types::UriString;
@@ -35,9 +34,6 @@ use serde::{
 
 pub use nonce::generate_nonce;
 pub use rfc3339::TimeStamp;
-
-#[cfg(feature = "alloy")]
-use crate::eip1271::AlloyProvider;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 /// EIP-4361 version.
@@ -340,7 +336,8 @@ macro_rules! typed_builder_doc {
 
 typed_builder_doc! {
     /// Verification options and configuration
-    pub struct VerificationOpts {
+    pub struct VerificationOpts
+    {
         /// Expected domain field.
         pub domain: Option<Authority>,
         /// Expected nonce field.
@@ -349,7 +346,7 @@ typed_builder_doc! {
         pub timestamp: Option<OffsetDateTime>,
         #[cfg(feature = "alloy")]
         /// RPC Provider used for on-chain checks. Necessary for contract wallets signatures.
-        pub rpc_provider: Option<AlloyProvider<Client>>,
+        pub rpc_provider: Option<AlloyProvider>,
     }
 }
 
@@ -393,10 +390,9 @@ pub enum VerificationError {
     /// Expected message nonce does not match.
     NonceMismatch,
     #[cfg(feature = "alloy")]
-    // Using a String because the original type requires a lifetime.
     #[error("Contract wallet query failed: {0}")]
     /// Contract wallet verification failed unexpectedly.
-    ContractCall(String),
+    ContractCall(#[from] alloy::contract::Error),
     #[error(
         "The signature is not 65 bytes long. It might mean that it is a EIP1271 signature and you have the `alloy` feature disabled or configured a provider."
     )]
@@ -476,7 +472,7 @@ impl Message {
     pub async fn verify_eip1271(
         &self,
         sig: &[u8],
-        provider: &AlloyProvider<Client>,
+        provider: &AlloyProvider,
     ) -> Result<bool, VerificationError> {
         let hash = Keccak256::new_with_prefix(self.eip191_bytes().unwrap()).finalize();
         eip1271::verify_eip1271(
@@ -526,6 +522,7 @@ impl Message {
     /// message.verify(&signature, &verification_opts).await.unwrap();
     /// # }
     /// ```
+
     pub async fn verify(
         &self,
         sig: &[u8],
@@ -823,6 +820,7 @@ Resources:
         include_str!("../tests/siwe/test/verification_positive.json");
     const VERIFICATION_NEGATIVE: &str =
         include_str!("../tests/siwe/test/verification_negative.json");
+    #[cfg(feature = "alloy")]
     const VERIFICATION_EIP1271: &str = include_str!("../tests/siwe/test/eip1271.json");
 
     fn fields_to_message(fields: &serde_json::Value) -> anyhow::Result<Message> {
@@ -932,6 +930,7 @@ Resources:
             println!("✅")
         }
     }
+
     #[cfg(feature = "alloy")]
     #[tokio::test]
     async fn verification_eip1271() {
@@ -949,7 +948,7 @@ Resources:
             .unwrap();
             let opts = VerificationOpts {
                 rpc_provider: Some(
-                    ProviderBuilder::new().on_http("https://eth.llamarpc.com".parse().unwrap()),
+                    ProviderBuilder::new().on_http("https://rpc.flashbots.net".parse().unwrap()),
                 ),
                 ..Default::default()
             };
@@ -957,7 +956,6 @@ Resources:
             println!("✅")
         }
     }
-
     #[tokio::test]
     async fn verification_negative() {
         let tests: serde_json::Value = serde_json::from_str(VERIFICATION_NEGATIVE).unwrap();

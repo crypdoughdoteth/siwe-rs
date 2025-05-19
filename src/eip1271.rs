@@ -1,14 +1,20 @@
-use ERC1271::isValidSignatureReturn;
 use alloy::{
     primitives::{Address, Bytes, FixedBytes},
-    providers::RootProvider,
+    providers::{
+        Identity, RootProvider,
+        fillers::{BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller},
+    },
     sol,
-    transports::http::{Client, Http},
 };
-
 use crate::VerificationError;
 
-pub type AlloyProvider<Client> = RootProvider<Http<Client>>;
+pub type AlloyProvider = FillProvider<
+    JoinFill<
+        Identity,
+        JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
+    >,
+    RootProvider,
+>;
 
 sol! {
     #[sol(rpc)]
@@ -38,7 +44,7 @@ pub async fn verify_eip1271(
     address: Address,
     message_hash: FixedBytes<32>,
     signature: Bytes,
-    provider: &AlloyProvider<Client>,
+    provider: &AlloyProvider,
 ) -> Result<bool, VerificationError> {
     let contract = ERC1271::new(address, provider);
     let res = contract
@@ -46,13 +52,9 @@ pub async fn verify_eip1271(
         .call()
         .await;
     match res {
-        Ok(isValidSignatureReturn {
-            magicValue: FixedBytes([22, 38, 186, 126]),
-        }) => Ok(true),
-        Ok(isValidSignatureReturn {
-            magicValue: FixedBytes([255, 255, 255, 255]),
-        }) => Ok(false),
+        Ok(FixedBytes([22, 38, 186, 126])) => Ok(true),
+        Ok(FixedBytes([255, 255, 255, 255])) => Ok(false),
         Ok(_) => Err(VerificationError::Eip1271NonCompliant)?,
-        Err(e) => Err(VerificationError::ContractCall(e.to_string()))?,
+        Err(e) => Err(VerificationError::ContractCall(e))?,
     }
 }
