@@ -12,7 +12,7 @@ siwe = "0.6"
 
 Features available:
 - `serde` for serialisation/deserialisation support;
-- `ethers` for EIP-1271 compliant contract wallets support; and
+- `alloy` for EIP-1271 compliant contract wallets support; and
 - `typed-builder` for nicer verification options construction.
 
 ## Usage
